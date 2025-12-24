@@ -1,0 +1,21 @@
+Experiment Log - 2025-12-24_00-45
+========================================
+timestamp: 2025-12-24_00-45
+output_dir: ./record/result_2025-12-24_00-45
+ckpt_name: best_model.ckpt
+load_model_path: ./record/result_2025-12-23_01-00/best_model.ckpt
+seed: 0
+device: cuda
+data_root: ../dataset
+img_size: (32, 32)
+num_classes: 10
+n_epochs: 50
+batch_size: 128
+learning_rate: 0.0002
+weight_decay: 1e-05
+num_workers: 0
+optimizer: Adam
+optim_hparams: {'lr': 0.0002, 'weight_decay': 1e-05}
+use_augmentation: False
+earlystop: 10
+========================================
