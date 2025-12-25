@@ -26,6 +26,7 @@ class Config:
         # --- 模型加载设置 ---
         #  "./record/result_2025-12-23_01-00/best_model.ckpt"
         self.load_model_path = "./record/result_2025-12-23_01-00/best_model.ckpt"
+        self.load_model = False
         
         # --- 基础环境 ---
         self.seed = 0
@@ -351,7 +352,6 @@ class Trainer:
 if __name__ == '__main__':
     # 1. 实例化配置
     cfg = Config()
-    cfg.create_output_dir()
     set_seed(cfg.seed)
     
     try:
@@ -362,24 +362,26 @@ if __name__ == '__main__':
         model = VGG16(num_classes=cfg.num_classes)
         
         # --- 加载预训练模型 ---
-        # if cfg.load_model_path is not None:
-        #     if os.path.exists(cfg.load_model_path):
-        #         print(f"Loading model checkpoint from {cfg.load_model_path}...")
-        #         # 加载权重
-        #         ckpt = torch.load(cfg.load_model_path, map_location=cfg.device)
-        #         model.load_state_dict(ckpt)
-        #         print("Model loaded successfully!")
-        #     else:
-        #         print(f"[Warning] Model path {cfg.load_model_path} does not exist. Training from scratch.")
+        if cfg.load_model is True:
+            if os.path.exists(cfg.load_model_path):
+                print(f"Loading model checkpoint from {cfg.load_model_path}...")
+                # 加载权重
+                ckpt = torch.load(cfg.load_model_path, map_location=cfg.device)
+                model.load_state_dict(ckpt)
+                print("Model loaded successfully!")
+            else:
+                print(f"[Warning] Model path {cfg.load_model_path} does not exist. Training from scratch.")
         
         # 打印模型权重信息
         print_model_weights_info(model)
+        print
 
         # # 4. 运行训练 
         # trainer = Trainer(cfg, model, train_loader, val_loader)
         # record = trainer.run()
         
         # # 5. 导出波形
+        # cfg.create_output_dir()
         # save_curves(record, cfg.output_dir)
         # print("Done.")
         
