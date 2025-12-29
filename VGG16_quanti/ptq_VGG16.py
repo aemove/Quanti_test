@@ -7,7 +7,7 @@ import copy
 
 # 导入你源码中的配置和数据加载模块
 try:
-    from VGG16_quanti import Config, VGG16, construct_dataloaders
+    from Quanti_test.VGG16_quanti.VGG16_origin import Config, VGG16, construct_dataloaders
 except ImportError:
     print("请确保 VGG16_quanti.py 在当前目录下")
     exit()

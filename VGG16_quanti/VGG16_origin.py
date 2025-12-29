@@ -374,7 +374,6 @@ if __name__ == '__main__':
         
         # 打印模型权重信息
         print_model_weights_info(model)
-        print
 
         # # 4. 运行训练 
         # trainer = Trainer(cfg, model, train_loader, val_loader)

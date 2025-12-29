@@ -38,8 +38,9 @@ def fuse_model(model):
     for i in range(len(model.features) - 2):
         if (isinstance(model.features[i], nn.Conv2d) and
             isinstance(model.features[i+1], nn.BatchNorm2d) and
-            isinstance(model.features[i+2], nn.ReLU)):
-            modules_to_fuse.append([f'features.{i}', f'features.{i+1}', f'features.{i+2}'])
+            isinstance(model.features[i+2], nn.ReLU6)):
+            # PyTorch 默认不支持 Conv+BN+ReLU6 的融合，只融合 Conv+BN
+            modules_to_fuse.append([f'features.{i}', f'features.{i+1}'])
     
     # 调用 PyTorch 的工具进行融合
     if modules_to_fuse:
