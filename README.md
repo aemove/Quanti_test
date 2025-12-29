@@ -11,13 +11,18 @@ Quanti_test/
 ├── VGG16.py                    # 标准 VGG16 实现 
 ├── template.py                 # 模板脚本
 ├── VGG16_quanti/               # 主要实验目录
-│   ├── VGG16_quanti.py         # 核心训练脚本 (支持自动归档、Config配置)
+│   ├── VGG16_origin.py         # 原始 VGG16 训练脚本 (支持自动归档、Config配置)
+│   ├── ptq_VGG16.py            # 训练后量化 (PTQ) 实验脚本
+│   ├── ptq_VGG16_2.py          # 训练后量化 (PTQ) 实验脚本 2
+│   ├── qat_VGG16.py            # 量化感知训练 (QAT) 实验脚本
 │   └── record/                 # 实验结果记录 (自动生成)
 │       └── result_YYYY-MM-DD_HH-MM/
 │           ├── config.txt      # 实验参数记录
 │           ├── best_model.ckpt # 最佳模型权重(已在 .gitignore 中忽略)
 │           ├── acc_curve.png   # 准确率曲线
 │           └── loss_curve.png  # 损失函数曲线
+├── torchao_test/               # torchao 库测试目录
+│   └── test.py
 ├── dataset/                    # 数据集目录 (已在 .gitignore 中忽略)
 └── .gitignore                  # Git 忽略配置
 ```
@@ -29,14 +34,6 @@ Quanti_test/
 *   **配置管理**：通过 `Config` 类集中管理超参数（Learning Rate, Batch Size, Epochs 等）。
 *   **可视化**：自动绘制并保存 Loss 和 Accuracy 训练曲线。
 *   **Early Stopping**：支持早停机制，防止过拟合。
-
-## 🛠️ 环境依赖
-
-请确保安装了以下 Python 库：
-
-```bash
-pip install torch torchvision tqdm matplotlib numpy pillow
-```
 
 ## 🏃‍♂️ 如何运行
 
@@ -61,6 +58,3 @@ pip install torch torchvision tqdm matplotlib numpy pillow
 ## ⚠️ 注意事项
 
 *   **数据集与模型文件**：`dataset/` 文件夹和 `*.ckpt` 文件已被 `.gitignore` 忽略，不会上传到 GitHub。
-*   **设备支持**：代码自动检测 CUDA，如果有 NVIDIA 显卡会自动加速。
-
-

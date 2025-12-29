@@ -32,15 +32,21 @@ def set_seed(seed):
 
 
 def fuse_model(model):
-    """算子融合: Conv+BN+ReLU -> ConvReLU"""
+    """算子融合: Conv+BN+ReLU -> ConvReLU, Linear+ReLU -> LinearReLU"""
     modules_to_fuse = []
     # 遍历 features 序列，寻找 Conv + BN + ReLU 的组合
     for i in range(len(model.features) - 2):
         if (isinstance(model.features[i], nn.Conv2d) and
             isinstance(model.features[i+1], nn.BatchNorm2d) and
-            isinstance(model.features[i+2], nn.ReLU6)):
+            isinstance(model.features[i+2], nn.ReLU)):
             # PyTorch 默认不支持 Conv+BN+ReLU6 的融合，只融合 Conv+BN
-            modules_to_fuse.append([f'features.{i}', f'features.{i+1}'])
+            modules_to_fuse.append([f'features.{i}', f'features.{i+1}',f'features.{i+2}'])
+    
+    # 遍历 classifier 序列，寻找 Linear + ReLU 的组合
+    for i in range(len(model.classifier) - 1):
+        if (isinstance(model.classifier[i], nn.Linear) and
+            isinstance(model.classifier[i+1], nn.ReLU)):
+            modules_to_fuse.append([f'classifier.{i}', f'classifier.{i+1}'])
     
     # 调用 PyTorch 的工具进行融合
     if modules_to_fuse:
@@ -77,6 +83,56 @@ def evaluate_accuracy(model, loader, device='cpu'):
             correct += (predicted == labels).sum().item()
     return 100 * correct / total
 
+def inspect_quantized_layer(model):
+    """打印量化层的详细参数 (Weight int8, Bias int32, Scales)"""
+    print("\n" + "="*40)
+    print("Inspect Quantized Layer Parameters (Layer 0)")
+    print("="*40)
+    
+    # 1. 获取 Input Scale (来自 QuantStub)
+    # convert 后，QuantStub 变为 torch.nn.quantized.Quantize
+    input_scale = model.quant.scale.item()
+    input_zp = model.quant.zero_point.item()
+    print(f"Input (QuantStub): Scale={input_scale:.6f}, ZP={input_zp}")
+    
+    # 2. 检查第一层卷积 (features[0])
+    # 它是 Conv + BN + ReLU 融合后的 QuantizedConvReLU2d
+    layer = model.features[0]
+    print(f"\nLayer: {layer}")
+    
+    # A. 权重 (Weight) - int8
+    # layer.weight() 返回 QuantizedTensor
+    w_q = layer.weight()
+    w_int8 = w_q.int_repr() # 获取底层的 int8 整数
+    w_scale = w_q.q_scale()
+    w_zp = w_q.q_zero_point()
+    
+    print(f"  [Weight]")
+    print(f"    Dtype: {w_q.dtype}")
+    print(f"    Scale: {w_scale:.6f}")
+    print(f"    Zero Point: {w_zp}")
+    print(f"    Int8 Sample (First kernel, 3x3):\n{w_int8[0, 0, :, :]}")
+    
+    # B. 偏置 (Bias) - float (底层对应 int32)
+    # PyTorch API 返回 float bias，但我们可以计算出对应的 int32 值
+    if layer.bias is not None:
+        b_fp = layer.bias() # <--- 注意：在量化模块中，bias() 是一个方法，需要调用
+        # Bias Scale = Input_Scale * Weight_Scale
+        # 注意：如果是 per-channel 量化，w_scale 是个 tensor。这里我们用的是 per-tensor。
+        bias_scale = input_scale * w_scale 
+        b_int32 = (b_fp / bias_scale).round().int()
+        
+        print(f"  [Bias]")
+        print(f"    Float Value (First 3): {b_fp[:3].tolist()}")
+        print(f"    Derived Bias Scale: {bias_scale:.9f}")
+        print(f"    Derived Int32 Value (First 3): {b_int32[:3].tolist()}")
+        
+    # C. 输出 (Output) - int8
+    # 这一层的输出 scale/zp，用于将 int32 累加结果重量化为 int8
+    print(f"  [Output Re-quantization]")
+    print(f"    Scale: {layer.scale:.6f}")
+    print(f"    Zero Point: {layer.zero_point}")
+
 # ==========================================
 # 3. Data 模块
 # ==========================================
@@ -97,47 +153,47 @@ def construct_dataloaders(cfg):
 class VGG16(nn.Module):
     def __init__(self, num_classes=10):
         super(VGG16, self).__init__()
-        self.quant = QuantStub()       # <--- [新增] 量化入口
+        self.quant = QuantStub()       #量化入口
         self.features = nn.Sequential(
             # Block 1
-            nn.Conv2d(3, 64, kernel_size=3, padding=1), nn.BatchNorm2d(64), nn.ReLU6(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1), nn.BatchNorm2d(64), nn.ReLU6(inplace=True),
+            nn.Conv2d(3, 64, kernel_size=3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             # Block 2
-            nn.Conv2d(64, 128, kernel_size=3, padding=1), nn.BatchNorm2d(128), nn.ReLU6(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1), nn.BatchNorm2d(128), nn.ReLU6(inplace=True),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             # Block 3
-            nn.Conv2d(128, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU6(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU6(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU6(inplace=True),
+            nn.Conv2d(128, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             # Block 4
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
+            nn.Conv2d(256, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             # Block 5
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
         self.avgpool = nn.AvgPool2d(kernel_size=1, stride=1)
         self.classifier = nn.Sequential(
-            nn.Linear(512, 4096), nn.ReLU6(inplace=True), nn.Dropout(),
-            nn.Linear(4096, 4096), nn.ReLU6(inplace=True), nn.Dropout(),
+            nn.Linear(512, 4096), nn.ReLU(inplace=True), nn.Dropout(),
+            nn.Linear(4096, 4096), nn.ReLU(inplace=True), nn.Dropout(),
             nn.Linear(4096, num_classes),
         )
-        self.dequant = DeQuantStub()   # <--- [新增] 反量化出口
+        self.dequant = DeQuantStub()   # 反量化出口
 
     def forward(self, x):
-        x = self.quant(x)              # <--- 1. 入口
+        x = self.quant(x)              
         x = self.features(x)
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.classifier(x)
-        x = self.dequant(x)            # <--- 2. 出口
+        x = self.dequant(x)            
         return x
 
 # ==========================================
@@ -174,7 +230,7 @@ if __name__ == '__main__':
             dtype=torch.qint8, 
             quant_min=-127,
             quant_max=127,
-            qscheme=torch.per_tensor_symmetric  # <--- [关键] 对称量化
+            qscheme=torch.per_tensor_symmetric  # 对称量化
         )
     )
     model_fp32.qconfig = my_qconfig
@@ -230,3 +286,6 @@ if __name__ == '__main__':
     print(f"\nAnalysis:")
     print(f"  >>> Speedup: {speedup:.2f}x")
     print(f"  >>> Accuracy Drop: {acc_drop:.2f}%")
+
+    # 7. 打印量化参数详情
+    inspect_quantized_layer(model_int8)

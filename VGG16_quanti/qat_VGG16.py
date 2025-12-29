@@ -17,7 +17,6 @@ class Config:
     def __init__(self):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.data_root = "../dataset"
-        # 请确保这里有预训练好的 FP32 权重路径
         self.load_model_path = "./record/result_2025-12-23_01-00/best_model.ckpt" 
         self.img_size = (32, 32)
         self.batch_size = 128
@@ -69,8 +68,14 @@ def fuse_model(model):
     for i in range(len(model.features) - 2):
         if (isinstance(model.features[i], nn.Conv2d) and
             isinstance(model.features[i+1], nn.BatchNorm2d) and
-            isinstance(model.features[i+2], nn.ReLU6)): # 注意这里是 ReLU6
-            modules_to_fuse.append([f'features.{i}', f'features.{i+1}'])
+            isinstance(model.features[i+2], nn.ReLU)): # 注意这里是 ReLU6
+            modules_to_fuse.append([f'features.{i}', f'features.{i+1}', f'features.{i+2}'])
+
+    # 遍历 classifier 序列，寻找 Linear + ReLU 的组合
+    for i in range(len(model.classifier) - 1):
+        if (isinstance(model.classifier[i], nn.Linear) and
+            isinstance(model.classifier[i+1], nn.ReLU)):
+            modules_to_fuse.append([f'classifier.{i}', f'classifier.{i+1}'])
     
     if modules_to_fuse:
         torch.quantization.fuse_modules(model, modules_to_fuse, inplace=True)
@@ -123,33 +128,33 @@ class VGG16(nn.Module):
         self.quant = QuantStub()       # 量化入口
         self.features = nn.Sequential(
             # 使用 ReLU6 替代 ReLU
-            nn.Conv2d(3, 64, kernel_size=3, padding=1), nn.BatchNorm2d(64), nn.ReLU6(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1), nn.BatchNorm2d(64), nn.ReLU6(inplace=True),
+            nn.Conv2d(3, 64, kernel_size=3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
-            nn.Conv2d(64, 128, kernel_size=3, padding=1), nn.BatchNorm2d(128), nn.ReLU6(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1), nn.BatchNorm2d(128), nn.ReLU6(inplace=True),
+            nn.Conv2d(64, 128, kernel_size=3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1), nn.BatchNorm2d(128), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
-            nn.Conv2d(128, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU6(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU6(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU6(inplace=True),
+            nn.Conv2d(128, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1), nn.BatchNorm2d(256), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
-            nn.Conv2d(256, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
+            nn.Conv2d(256, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU6(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
+            nn.Conv2d(512, 512, kernel_size=3, padding=1), nn.BatchNorm2d(512), nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
         self.avgpool = nn.AvgPool2d(kernel_size=1, stride=1)
         self.classifier = nn.Sequential(
-            nn.Linear(512, 4096), nn.ReLU6(inplace=True), nn.Dropout(),
-            nn.Linear(4096, 4096), nn.ReLU6(inplace=True), nn.Dropout(),
+            nn.Linear(512, 4096), nn.ReLU(inplace=True), nn.Dropout(),
+            nn.Linear(4096, 4096), nn.ReLU(inplace=True), nn.Dropout(),
             nn.Linear(4096, num_classes),
         )
         self.dequant = DeQuantStub()   # 反量化出口
